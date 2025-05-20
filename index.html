@@ -17,8 +17,8 @@
       button { padding: 12px 20px; margin: 5px; background: linear-gradient(45deg, #2ecc71, #27ae60); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; transition: transform 0.2s ease, background 0.3s ease; }
       button:hover { transform: scale(1.05); background: linear-gradient(45deg, #27ae60, #2ecc71); }
       button:disabled { background: #95a5a6; cursor: not-allowed; transform: none; }
-      #adminButton, #adminBackButton { background: linear-gradient(45deg, #e74c3c, #c0392b); }
-      #adminButton:hover, #adminBackButton:hover { background: linear-gradient(45deg, #c0392b, #e74c3c); }
+      #adminButton, #adminBackButton, #adminBackButtonResults { background: linear-gradient(45deg, #e74c3c, #c0392b); }
+      #adminButton:hover, #adminBackButton:hover, #adminBackButtonResults:hover { background: linear-gradient(45deg, #c0392b, #e74c3c); }
       #clearDatabaseButton { background: linear-gradient(45deg, #e74c3c, #c0392b); }
       #clearDatabaseButton:hover { background: linear-gradient(45deg, #c0392b, #e74c3c); }
       #voteMessage { margin-top: 15px; font-size: 16px; color: #34495e; text-align: center; }
@@ -184,7 +184,7 @@
     </div>
 
     <script>
-      console.log("script.js загружен");
+      const API_URL = 'https://script.google.com/macros/s/AKfycbw279uL2uxowdo2cF-I1haXoU-_YRHXVLsM_NERav2vAKwqJcEB5TOnHezFZ8n9gmrr/exec';
 
       let currentUser = null;
       let allUsers = [];
@@ -218,7 +218,6 @@
         document.getElementById('cancelClearDatabaseButton').addEventListener('click', closeClearDatabaseModal);
         document.getElementById('refreshDataButton').addEventListener('click', refreshAllData);
 
-        // Добавляем обработчики для автодополнения
         ['cookInputStar', 'cookInputPig', 'waiterInputStar', 'waiterInputPig'].forEach(id => {
           document.getElementById(id).addEventListener('input', () => {
             const [role, voteType] = id.replace('Input', '').split(/(?=[A-Z])/);
@@ -231,25 +230,19 @@
         return str.trim().toLowerCase().replace(/\s+/g, ' ');
       }
 
-      function updateUserCache(user) {
-        const cachedUsers = JSON.parse(localStorage.getItem('allUsersCache') || '{"users": []}').users;
-        const index = cachedUsers.findIndex(u => u.id === user.id);
-        if (index > -1) {
-          cachedUsers[index] = user;
-        } else {
-          cachedUsers.push(user);
-        }
-        localStorage.setItem('allUsersCache', JSON.stringify({ users: cachedUsers, timestamp: new Date().getTime() }));
-      }
-
-      function loadUsersForAutocomplete() {
-        const cachedData = localStorage.getItem('allUsersCache');
-        if (cachedData) {
-          const { users } = JSON.parse(cachedData);
-          allUsers = users;
-        } else {
+      async function loadUsersForAutocomplete() {
+        try {
+          const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'getUsers' })
+          });
+          const data = await response.json();
+          if (data.error) throw new Error(data.error);
+          allUsers = data;
+        } catch (error) {
+          console.error("Ошибка загрузки пользователей:", error);
           allUsers = [];
-          localStorage.setItem('allUsersCache', JSON.stringify({ users: [], timestamp: new Date().getTime() }));
         }
       }
 
@@ -378,7 +371,7 @@
         }
       }
 
-      function register() {
+      async function register() {
         try {
           if (localStorage.getItem('currentUser')) {
             alert('Вы уже зарегистрированы!');
@@ -397,40 +390,31 @@
           const normalizedSurname = normalizeString(surname);
           const normalizedName = normalizeString(name);
 
-          const existingUser = allUsers.find(u => 
-            (u.normalizedSurname === normalizedSurname && u.normalizedName === normalizedName) ||
-            (u.normalizedSurname === normalizedName && u.normalizedName === normalizedSurname)
-          );
-
-          if (existingUser && existingUser.registered) {
-            alert('Пользователь уже зарегистрирован!');
-            return;
-          }
-
-          const userId = Date.now().toString();
           const newUser = {
-            id: userId,
             role,
             surname,
             name,
             normalizedSurname,
             normalizedName,
-            hasVotedCookStar: false,
-            hasVotedCookPig: false,
-            hasVotedWaiterStar: false,
-            hasVotedWaiterPig: false,
             registered: true
           };
 
-          if (existingUser) {
-            newUser.id = existingUser.id;
-            allUsers = allUsers.filter(u => u.id !== existingUser.id);
-            allUsers.push(newUser);
-            updateUserCache(newUser);
-          } else {
-            allUsers.push(newUser);
-            updateUserCache(newUser);
+          const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'register', user: newUser })
+          });
+          const data = await response.json();
+          if (data.error) {
+            alert(data.error);
+            return;
           }
+
+          newUser.id = data.id;
+          newUser.hasVotedCookStar = false;
+          newUser.hasVotedCookPig = false;
+          newUser.hasVotedWaiterStar = false;
+          newUser.hasVotedWaiterPig = false;
 
           currentUser = newUser;
           localStorage.setItem('currentUser', JSON.stringify(currentUser));
@@ -448,14 +432,14 @@
             updateVotingAvailability();
           };
 
-          loadUsersForAutocomplete();
+          await loadUsersForAutocomplete();
         } catch (error) {
           console.error("Ошибка при регистрации:", error);
           alert("Произошла ошибка: " + error.message);
         }
       }
 
-      function vote(targetRole, voteType) {
+      async function vote(targetRole, voteType) {
         try {
           if (!currentUser || !canVote()) {
             alert(!currentUser ? 'Сначала зарегистрируйтесь!' : 'Голосование недоступно!');
@@ -494,43 +478,35 @@
           }
 
           const targetUser = existingUser || {
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
             role: targetRole,
             surname,
             name,
             normalizedSurname,
             normalizedName,
-            hasVotedCookStar: false,
-            hasVotedCookPig: false,
-            hasVotedWaiterStar: false,
-            hasVotedWaiterPig: false,
             registered: false
           };
 
-          if (!existingUser) {
-            allUsers.push(targetUser);
-            updateUserCache(targetUser);
-          }
-
-          let votes = JSON.parse(localStorage.getItem('votes') || '[]');
-          const existingVote = votes.find(v => v.from === currentUser.id && v.to === targetUser.id && v.type === voteType);
-          if (existingVote) {
-            alert('Вы уже голосовали за этого человека этим символом!');
+          const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'vote',
+              vote: {
+                from: currentUser.id,
+                type: voteType,
+                targetRole
+              },
+              targetUser
+            })
+          });
+          const data = await response.json();
+          if (data.error) {
+            alert(data.error);
             return;
           }
 
-          votes.push({
-            from: currentUser.id,
-            to: targetUser.id,
-            type: voteType,
-            targetRole,
-            timestamp: new Date().toISOString()
-          });
-          localStorage.setItem('votes', JSON.stringify(votes));
-
           currentUser[voteKey] = true;
           localStorage.setItem('currentUser', JSON.stringify(currentUser));
-          updateUserCache(currentUser);
 
           if (targetRole === 'cook') {
             if (voteType === 'star') cookStarVoted = true;
@@ -541,26 +517,44 @@
           }
 
           const voteSymbol = voteType === 'star' ? '★' : '🐷';
-          document.getElementById('voteMessage').textContent = `Вы проголосовали за ${targetUser.surname} ${targetUser.name} и дали ему ${voteSymbol}`;
+          document.getElementById('voteMessage').textContent = `Вы проголосовали за ${surname} ${name} и дали ему ${voteSymbol}`;
           targetInput.value = '';
 
           updateMyVotes();
           updateVotingSections();
-          loadUsersForAutocomplete();
+          await loadUsersForAutocomplete();
         } catch (error) {
           console.error("Ошибка при голосовании:", error);
           alert("Произошла ошибка: " + error.message);
         }
       }
 
-      function updateMyVotes() {
-        const votes = JSON.parse(localStorage.getItem('votes') || '[]').filter(v => v.from === currentUser?.id);
-        const votesWithUsers = votes.map(vote => ({
-          vote,
-          user: allUsers.find(u => u.id === vote.to) || { surname: 'Неизвестно', name: '', role: vote.targetRole }
-        }));
-        localStorage.setItem(`votes_${currentUser?.id}`, JSON.stringify(votesWithUsers));
-        displayVotes(votesWithUsers, document.getElementById('myVotesDisplay'));
+      async function updateMyVotes() {
+        try {
+          const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'getStats' })
+          });
+          const data = await response.json();
+          if (data.error) throw new Error(data.error);
+
+          const votes = data.results
+            .filter(user => user.id === currentUser?.id)
+            .flatMap(user => [
+              ...user.stars ? [{ type: 'star', targetRole: user.role, to: user.id }] : [],
+              ...user.pigs ? [{ type: 'pig', targetRole: user.role, to: user.id }] : []
+            ]);
+
+          const votesWithUsers = votes.map(vote => ({
+            vote,
+            user: allUsers.find(u => u.id === vote.to) || { surname: 'Неизвестно', name: '', role: vote.targetRole }
+          }));
+          displayVotes(votesWithUsers, document.getElementById('myVotesDisplay'));
+        } catch (error) {
+          console.error("Ошибка загрузки голосов:", error);
+          document.getElementById('myVotesDisplay').textContent = 'Ошибка загрузки голосов.';
+        }
       }
 
       function displayVotes(votes, element) {
@@ -576,15 +570,13 @@
         });
       }
 
-      function updateCooksList() {
+      async function updateCooksList() {
         const cooks = allUsers.filter(user => user.role === 'cook' && user.registered);
-        localStorage.setItem('cachedCooks', JSON.stringify(cooks));
         displayList(cooks, document.getElementById('cooksList'));
       }
 
-      function updateWaitersList() {
+      async function updateWaitersList() {
         const waiters = allUsers.filter(user => user.role === 'waiter' && user.registered);
-        localStorage.setItem('cachedWaiters', JSON.stringify(waiters));
         displayList(waiters, document.getElementById('waitersList'));
       }
 
@@ -641,24 +633,32 @@
         updateVotingAvailability();
       }
 
-      function adminLogin() {
+      async function adminLogin() {
         const login = document.getElementById('adminLogin').value;
         const password = document.getElementById('adminPassword').value;
         const errorDiv = document.getElementById('adminError');
 
-        const admins = JSON.parse(localStorage.getItem('admins') || '[]');
-        const admin = admins.find(a => a.login === login && a.password === password);
+        try {
+          const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'adminLogin', login, password })
+          });
+          const data = await response.json();
+          if (data.error) {
+            errorDiv.textContent = data.error;
+            return;
+          }
 
-        if (admin) {
           errorDiv.textContent = '';
           document.getElementById('adminLoginForm').style.display = 'none';
           document.getElementById('adminResults').style.display = 'block';
           updateAdminResults();
           updateRegistrationStats();
-          loadVotingPeriod();
           displayVotingPeriodInAdmin();
-        } else {
-          errorDiv.textContent = 'Неверный логин или пароль!';
+        } catch (error) {
+          console.error("Ошибка входа админа:", error);
+          errorDiv.textContent = 'Ошибка входа: ' + error.message;
         }
       }
 
@@ -705,34 +705,42 @@
         updateVotingAvailability();
       }
 
-      function updateRegistrationStats() {
-        const totalPeople = allUsers.length;
-        const totalRegistered = allUsers.filter(u => u.registered).length;
-        const totalUnregistered = totalPeople - totalRegistered;
-        const totalCooks = allUsers.filter(u => u.role === 'cook' && u.registered).length;
-        const totalWaiters = allUsers.filter(u => u.role === 'waiter' && u.registered).length;
+      async function updateRegistrationStats() {
+        try {
+          const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'getStats' })
+          });
+          const data = await response.json();
+          if (data.error) throw new Error(data.error);
 
-        const stats = { totalPeople, totalRegistered, totalUnregistered, totalCooks, totalWaiters };
-        localStorage.setItem('registrationStats', JSON.stringify(stats));
-
-        document.getElementById('totalPeople').textContent = totalPeople;
-        document.getElementById('totalRegistered').textContent = totalRegistered;
-        document.getElementById('totalUnregistered').textContent = totalUnregistered;
-        document.getElementById('totalCooks').textContent = totalCooks;
-        document.getElementById('totalWaiters').textContent = totalWaiters;
+          document.getElementById('totalPeople').textContent = data.totalPeople;
+          document.getElementById('totalRegistered').textContent = data.totalRegistered;
+          document.getElementById('totalUnregistered').textContent = data.totalUnregistered;
+          document.getElementById('totalCooks').textContent = data.totalCooks;
+          document.getElementById('totalWaiters').textContent = data.totalWaiters;
+        } catch (error) {
+          console.error("Ошибка загрузки статистики:", error);
+          document.getElementById('registrationStats').textContent = 'Ошибка загрузки статистики.';
+        }
       }
 
-      function updateAdminResults() {
-        const votes = JSON.parse(localStorage.getItem('votes') || '[]');
-        const usersWithVotes = allUsers.map(user => {
-          const userVotes = votes.filter(v => v.to === user.id);
-          const stars = userVotes.filter(v => v.type === 'star').length;
-          const pigs = userVotes.filter(v => v.type === 'pig').length;
-          return { ...user, stars, pigs };
-        }).filter(user => user.stars > 0 || user.pigs > 0);
+      async function updateAdminResults() {
+        try {
+          const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'getStats' })
+          });
+          const data = await response.json();
+          if (data.error) throw new Error(data.error);
 
-        localStorage.setItem('adminResults', JSON.stringify({ usersWithVotes }));
-        displayResults(usersWithVotes);
+          displayResults(data.results);
+        } catch (error) {
+          console.error("Ошибка загрузки результатов:", error);
+          document.getElementById('cooksResultsStars').textContent = 'Ошибка загрузки результатов.';
+        }
       }
 
       function displayResults(usersWithVotes) {
@@ -781,57 +789,56 @@
         modal.style.display = 'none';
       }
 
-      function clearDatabase() {
+      async function clearDatabase() {
         const password = document.getElementById('clearDatabasePassword').value;
         const errorDiv = document.getElementById('clearDatabaseError');
 
-        const admins = JSON.parse(localStorage.getItem('admins') || '[]');
-        const admin = admins.find(a => a.password === password);
+        try {
+          const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'clearDatabase', password })
+          });
+          const data = await response.json();
+          if (data.error) {
+            errorDiv.textContent = data.error;
+            return;
+          }
 
-        if (!admin) {
-          errorDiv.textContent = 'Неверный пароль!';
-          return;
+          allUsers = [];
+          currentUser = null;
+          cookStarVoted = false;
+          cookPigVoted = false;
+          waiterStarVoted = false;
+          waiterPigVoted = false;
+          localStorage.removeItem('currentUser');
+
+          closeClearDatabaseModal();
+          updateAdminResults();
+          updateRegistrationStats();
+          loadVotingPeriod();
+          updateVotingAvailability();
+          alert('База данных успешно очищена!');
+        } catch (error) {
+          console.error("Ошибка очистки базы:", error);
+          errorDiv.textContent = 'Ошибка: ' + error.message;
         }
-
-        localStorage.clear();
-        allUsers = [];
-        currentUser = null;
-        votingPeriod = null;
-        cookStarVoted = false;
-        cookPigVoted = false;
-        waiterStarVoted = false;
-        waiterPigVoted = false;
-
-        // Восстанавливаем админ-аккаунт после очистки
-        localStorage.setItem('admins', JSON.stringify([{ login: 'admin', password: 'admin123' }]));
-
-        closeClearDatabaseModal();
-        updateAdminResults();
-        updateRegistrationStats();
-        loadVotingPeriod();
-        updateVotingAvailability();
-        alert('База данных успешно очищена!');
       }
 
-      function refreshAllData() {
+      async function refreshAllData() {
         try {
-          loadUsersForAutocomplete();
+          await loadUsersForAutocomplete();
           loadVotingPeriod();
-          updateCooksList();
-          updateWaitersList();
-          updateRegistrationStats();
-          updateAdminResults();
+          await updateCooksList();
+          await updateWaitersList();
+          await updateRegistrationStats();
+          await updateAdminResults();
           updateVotingAvailability();
           alert('Данные успешно обновлены!');
         } catch (error) {
           console.error("Ошибка при обновлении данных:", error);
           alert('Произошла ошибка при обновлении данных: ' + error.message);
         }
-      }
-
-      // Инициализация админ-аккаунта по умолчанию (для локального тестирования)
-      if (!localStorage.getItem('admins')) {
-        localStorage.setItem('admins', JSON.stringify([{ login: 'admin', password: 'admin123' }]));
       }
     </script>
   </body>
