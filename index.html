@@ -16,8 +16,9 @@
       input:focus, select:focus { border-color: #3498db; outline: none; }
       button { padding: 12px 20px; margin: 5px; background: linear-gradient(45deg, #2ecc71, #27ae60); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; transition: transform 0.2s ease, background 0.3s ease; }
       button:hover { transform: scale(1.05); background: linear-gradient(45deg, #27ae60, #2ecc71); }
-      #adminButton { background: linear-gradient(45deg, #e74c3c, #c0392b); }
-      #adminButton:hover { background: linear-gradient(45deg, #c0392b, #e74c3c); }
+      button:disabled { background: #95a5a6; cursor: not-allowed; transform: none; }
+      #adminButton, #adminBackButton { background: linear-gradient(45deg, #e74c3c, #c0392b); }
+      #adminButton:hover, #adminBackButton:hover { background: linear-gradient(45deg, #c0392b, #e74c3c); }
       #clearDatabaseButton { background: linear-gradient(45deg, #e74c3c, #c0392b); }
       #clearDatabaseButton:hover { background: linear-gradient(45deg, #c0392b, #e74c3c); }
       #voteMessage { margin-top: 15px; font-size: 16px; color: #34495e; text-align: center; }
@@ -46,11 +47,13 @@
       #cancelClearDatabaseButton:hover { background: linear-gradient(45deg, #7f8c8d, #95a5a6); }
       .vote-section { display: flex; align-items: center; margin-bottom: 15px; }
       .vote-section .autocomplete { flex: 1; margin-right: 10px; }
+      .no-voting { color: #e74c3c; text-align: center; font-size: 18px; margin: 20px 0; }
     </style>
   </head>
   <body>
     <div class="container">
       <div id="mainPage">
+        <div class="voting-period" id="votingPeriod"></div>
         <div id="userInfo"></div>
 
         <div id="registration" class="form-section">
@@ -67,7 +70,6 @@
 
         <div id="voting" class="form-section" style="display: none;">
           <h2>Голосование</h2>
-          <div class="voting-period" id="votingPeriod"></div>
           <div id="cookStarSection" class="vote-section">
             <div class="autocomplete">
               <input type="text" id="cookInputStar" placeholder="Выберите повара для ★">
@@ -123,7 +125,7 @@
           <input type="text" id="adminLogin" placeholder="Логин">
           <input type="password" id="adminPassword" placeholder="Пароль">
           <button id="adminLoginButton">Войти</button>
-          <button id="backToMainButton">Назад</button>
+          <button id="adminBackButton">Назад</button>
           <div id="adminError" style="color: #e74c3c;"></div>
         </div>
         <div id="adminResults" style="display: none;">
@@ -157,6 +159,7 @@
           </div>
           <button id="refreshDataButton">Обновить данные</button>
           <button id="clearDatabaseButton">Очистить базу данных</button>
+          <button id="adminBackButtonResults">Назад</button>
         </div>
       </div>
 
@@ -198,6 +201,7 @@
         loadVotingPeriod();
         updateCooksList();
         updateWaitersList();
+        updateVotingAvailability();
 
         document.getElementById('registerButton').addEventListener('click', register);
         document.getElementById('voteWaiterStar').addEventListener('click', () => vote('waiter', 'star'));
@@ -206,7 +210,8 @@
         document.getElementById('voteCookPig').addEventListener('click', () => vote('cook', 'pig'));
         document.getElementById('adminButton').addEventListener('click', showAdminPage);
         document.getElementById('adminLoginButton').addEventListener('click', adminLogin);
-        document.getElementById('backToMainButton').addEventListener('click', backToMainPage);
+        document.getElementById('adminBackButton').addEventListener('click', backToMainPage);
+        document.getElementById('adminBackButtonResults').addEventListener('click', backToMainPage);
         document.getElementById('setVotingPeriodButton').addEventListener('click', setVotingPeriod);
         document.getElementById('clearDatabaseButton').addEventListener('click', showClearDatabaseModal);
         document.getElementById('confirmClearDatabaseButton').addEventListener('click', clearDatabase);
@@ -256,25 +261,30 @@
           displayVotingPeriod();
         } else {
           votingPeriod = null;
-          document.getElementById('votingPeriod').innerHTML = '<p>Период голосования не установлен.</p>';
+          displayVotingPeriod();
         }
       }
 
       function displayVotingPeriod() {
         const votingPeriodDiv = document.getElementById('votingPeriod');
         if (!votingPeriod) {
-          votingPeriodDiv.innerHTML = '<p>Период голосования не установлен.</p>';
+          votingPeriodDiv.innerHTML = '<p class="no-voting">Админ не задал время голосования!</p>';
           return;
         }
 
         const startDate = new Date(votingPeriod.start);
         const endDate = new Date(votingPeriod.end);
+        const now = new Date();
 
         const formatDateTime = (date) => {
           return `${date.getDate().toString().padStart(2, '0')}.${(date.getMonth() + 1).toString().padStart(2, '0')}.${date.getFullYear()} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
         };
 
-        votingPeriodDiv.innerHTML = `<p>Голосование открыто с ${formatDateTime(startDate)} до ${formatDateTime(endDate)}</p>`;
+        if (now >= startDate && now <= endDate) {
+          votingPeriodDiv.innerHTML = `<p>Голосование открыто с ${formatDateTime(startDate)} до ${formatDateTime(endDate)}</p>`;
+        } else {
+          votingPeriodDiv.innerHTML = '<p class="no-voting">Голосование недоступно! Период истек или еще не начался.</p>';
+        }
       }
 
       function canVote() {
@@ -283,6 +293,27 @@
         const start = new Date(votingPeriod.start);
         const end = new Date(votingPeriod.end);
         return now >= start && now <= end;
+      }
+
+      function updateVotingAvailability() {
+        const votingSection = document.getElementById('voting');
+        const voteButtons = [
+          document.getElementById('voteCookStar'),
+          document.getElementById('voteCookPig'),
+          document.getElementById('voteWaiterStar'),
+          document.getElementById('voteWaiterPig')
+        ];
+
+        if (!canVote() && currentUser) {
+          votingSection.style.display = 'none';
+          document.getElementById('lists').style.display = 'block';
+        } else if (currentUser) {
+          updateVotingSections();
+        }
+
+        voteButtons.forEach(button => {
+          button.disabled = !canVote();
+        });
       }
 
       function updateAutocomplete(role, voteType) {
@@ -332,7 +363,7 @@
           if (storedUser) {
             currentUser = JSON.parse(storedUser);
             document.getElementById('registration').style.display = 'none';
-            document.getElementById('voting').style.display = 'block';
+            document.getElementById('voting').style.display = canVote() ? 'block' : 'none';
             document.getElementById('myVotes').style.display = 'block';
             document.getElementById('userInfo').textContent = `${currentUser.role === 'cook' ? 'Повар' : 'Официант'} ${currentUser.surname} ${currentUser.name}`;
             cookStarVoted = currentUser.hasVotedCookStar;
@@ -340,7 +371,7 @@
             waiterStarVoted = currentUser.hasVotedWaiterStar;
             waiterPigVoted = currentUser.hasVotedWaiterPig;
             updateMyVotes();
-            updateVotingSections();
+            updateVotingAvailability();
           }
         } catch (error) {
           console.error("Ошибка в checkExistingUser:", error);
@@ -410,11 +441,11 @@
 
           document.getElementById('modalOkButton').onclick = () => {
             modal.style.display = 'none';
-            document.getElementById('voting').style.display = 'block';
+            document.getElementById('voting').style.display = canVote() ? 'block' : 'none';
             document.getElementById('myVotes').style.display = 'block';
             document.getElementById('userInfo').textContent = `${role === 'cook' ? 'Повар' : 'Официант'} ${currentUser.surname} ${currentUser.name}`;
             updateMyVotes();
-            updateVotingSections();
+            updateVotingAvailability();
           };
 
           loadUsersForAutocomplete();
@@ -590,6 +621,7 @@
           updateWaitersList();
         } else {
           listsSection.style.display = 'none';
+          voteSection.style.display = canVote() ? 'block' : 'none';
         }
       }
 
@@ -605,6 +637,8 @@
         document.getElementById('adminPassword').value = '';
         document.getElementById('adminError').textContent = '';
         document.getElementById('adminResults').style.display = 'none';
+        document.getElementById('adminLoginForm').style.display = 'block';
+        updateVotingAvailability();
       }
 
       function adminLogin() {
@@ -668,6 +702,7 @@
         document.getElementById('votingPeriodMessage').textContent = 'Период голосования успешно установлен!';
         document.getElementById('votingPeriodMessage').style.color = '#2ecc71';
         loadVotingPeriod();
+        updateVotingAvailability();
       }
 
       function updateRegistrationStats() {
@@ -773,6 +808,8 @@
         closeClearDatabaseModal();
         updateAdminResults();
         updateRegistrationStats();
+        loadVotingPeriod();
+        updateVotingAvailability();
         alert('База данных успешно очищена!');
       }
 
@@ -784,6 +821,7 @@
           updateWaitersList();
           updateRegistrationStats();
           updateAdminResults();
+          updateVotingAvailability();
           alert('Данные успешно обновлены!');
         } catch (error) {
           console.error("Ошибка при обновлении данных:", error);
